@@ -1,0 +1,1489 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FOREVER WHITE.MX - POS & Management Suite</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#fdf4ff',
+              100: '#fae8ff',
+              400: '#c084fc',
+              500: '#a855f7',
+              600: '#9333ea',
+              800: '#6b21a8',
+              900: '#581c87',
+              950: '#2e0754',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Prop-Types (Required for Recharts UMD) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+  <!-- Recharts -->
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <!-- Babel Standalone -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- html2canvas for High Resolution Ticket PNG Generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;800&display=swap');
+    
+    body { 
+      font-family: 'Inter', sans-serif; 
+      background-color: #03000a;
+      color: #f8fafc;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Thermal Printer Styles (80mm/58mm) */
+    @media print {
+      body * { visibility: hidden !important; }
+      #printable-thermal-area, #printable-thermal-area * { visibility: visible !important; }
+      #printable-thermal-area {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        max-width: 80mm !important;
+        margin: 0 !important;
+        padding: 4mm !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: white !important;
+        color: black !important;
+      }
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #03000a; }
+    ::-webkit-scrollbar-thumb { background: #1a082e; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3b0764; }
+
+    .glow-purple {
+      box-shadow: 0 0 25px -5px rgba(168, 85, 247, 0.3);
+    }
+  </style>
+</head>
+<body class="bg-[#03000a] text-slate-100 antialiased selection:bg-purple-500 selection:text-white">
+  
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    // Official Logo Reference
+    const LOGO_URL = "1000000699_8438b4.png";
+
+    // Custom Visual Bar Chart Fallback Component
+    const CustomBarChart = ({ data, keyKey = "label", valueKey = "val", colorClass = "bg-purple-500" }) => {
+      if (!data || data.length === 0) return <div className="text-xs text-purple-300/50 text-center py-4">Sin datos registrados</div>;
+      const maxVal = Math.max(...data.map(d => Number(d[valueKey]) || 0), 1);
+
+      return (
+        <div className="space-y-2.5 pt-1">
+          {data.map((item, idx) => {
+            const val = Number(item[valueKey]) || 0;
+            const pct = Math.min(100, (val / maxVal) * 100);
+            return (
+              <div key={idx} className="space-y-1">
+                <div className="flex justify-between text-xs font-semibold text-slate-300">
+                  <span className="truncate pr-2">{item[keyKey]}</span>
+                  <span className="font-mono text-purple-300 shrink-0">{val.toLocaleString()}</span>
+                </div>
+                <div className="w-full h-2.5 bg-[#080214] rounded-full overflow-hidden border border-purple-900/40">
+                  <div 
+                    style={{ width: `${pct}%` }} 
+                    className={`h-full rounded-full transition-all duration-500 ${colorClass}`}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    };
+
+    // Vector Icons Collection
+    const Icon = ({ name, className = "w-4 h-4" }) => {
+      const icons = {
+        plus: <path d="M5 12h14M12 5v14" />,
+        trash: <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />,
+        printer: <path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z" />,
+        search: <path d="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z" />,
+        dollar: <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />,
+        trendingUp: <path d="m22 7-8.5 8.5-5-5L1 18M16 7h6v6" />,
+        trendingDown: <path d="m22 17-8.5-8.5-5 5L1 6M16 17h6v-6" />,
+        users: <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 1 0-3.87M16 3.13a4 4 0 0 1 0 7.75" />,
+        shoppingBag: <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0" />,
+        store: <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M10 22V12h4v10" />,
+        fileText: <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8" />,
+        settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+        barChart: <path d="M12 20V10M18 20V4M6 20v-4" />,
+        x: <path d="M18 6 6 18M6 6l12 12" />,
+        messageCircle: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z" />,
+        alertTriangle: <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3zM12 9v4M12 17h.01" />,
+        shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+        box: <React.Fragment><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5M12 22V12" /></React.Fragment>,
+        uploadCloud: <path d="M4 14.89 4.08 15a5.5 5.5 0 0 0 11 0l.08-.11a6 6 0 0 0 2.84-11.41 5.97 5.97 0 0 0-11 1.4A5.5 5.5 0 0 0 2 12c0 1.2.39 2.3 1.05 3.2zM12 12v9M16 16l-4-4-4 4" />,
+        check: <path d="M20 6 9 17l-5-5" />,
+        chevronRight: <path d="m9 18 6-6-6-6" />,
+        creditCard: <React.Fragment><rect width="20" height="14" x="2" y="5" rx="2" /><line x1="2" x2="22" y1="10" y2="10" /></React.Fragment>,
+        camera: <React.Fragment><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="3" /></React.Fragment>,
+        share: <React.Fragment><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></React.Fragment>,
+        tag: <React.Fragment><path d="M12 2H2v10l11.29 11.29a1 1 0 0 0 1.41 0l7.29-7.29a1 1 0 0 0 0-1.41L12 2z" /><path d="M7 7h.01" /></React.Fragment>,
+        sparkles: <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z" />,
+        userCheck: <React.Fragment><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><polyline points="16 11 18 13 22 9" /></React.Fragment>,
+        mail: <React.Fragment><rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></React.Fragment>,
+        mapPin: <React.Fragment><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></React.Fragment>,
+        phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+      };
+
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+          {icons[name] || <circle cx="12" cy="12" r="10" />}
+        </svg>
+      );
+    };
+
+    // Default Initial Data Setup
+    const DEFAULT_BRANCHES = [
+      { id: 'b1', name: 'Forever White - Roma Norte', address: 'Av. Álvaro Obregón 120, CDMX', phone: '55 1234 5678', manager: 'Carlos M.' },
+      { id: 'b2', name: 'Forever White - Polanco', address: 'Masaryk 310, CDMX', phone: '55 9876 5432', manager: 'Valeria R.' },
+      { id: 'b3', name: 'Forever White - San Ángel', address: 'Av. Revolución 1450, CDMX', phone: '55 5555 4433', manager: 'Diego S.' }
+    ];
+
+    const DEFAULT_USERS = [
+      { id: 'u1', email: 'admin@foreverwhite.mx', name: 'Director General', role: 'admin', branchId: 'all' },
+      { id: 'u2', email: 'caja.roma@foreverwhite.mx', name: 'Caja Roma', role: 'cashier', branchId: 'b1' },
+      { id: 'u3', email: 'caja.polanco@foreverwhite.mx', name: 'Caja Polanco', role: 'cashier', branchId: 'b2' },
+      { id: 'u4', email: 'tecnico.restauracion@foreverwhite.mx', name: 'Técnico Lavado', role: 'technician', branchId: 'b1' }
+    ];
+
+    const DEFAULT_DISCOUNT_CODES = [
+      { code: 'BIENVENIDA', percent: 10, description: '10% de descuento primer servicio' },
+      { code: 'SNEAKERHEAD', percent: 15, description: '15% en restauración de color' },
+      { code: 'VIP20', percent: 20, description: '20% de descuento clientes frecuentes' }
+    ];
+
+    const DEFAULT_CONVENIOS = [
+      { id: 'conv-1', name: 'Gimnasio SmartFit Roma Norte', discountPercent: 12, contact: 'Gerencia General' },
+      { id: 'conv-2', name: 'Barbería Capital Barber', discountPercent: 15, contact: 'Marcos V.' },
+      { id: 'conv-3', name: 'Club de Corredores CDMX', discountPercent: 10, contact: 'Sofía R.' }
+    ];
+
+    const DEFAULT_INVENTORY = [
+      { id: 'inv-1', name: 'Jabón Concentrado Angelus Foam', category: 'Limpiadores', stock: 4500, unit: 'ml', minStock: 1000, startDate: '2026-09-01', dailyAvgUsage: 120, branchId: 'b1', costPerUnit: 0.25 },
+      { id: 'inv-2', name: 'Solución Unyellowing UV Gel', category: 'Químicos Especiales', stock: 350, unit: 'ml', minStock: 500, startDate: '2026-09-10', dailyAvgUsage: 25, branchId: 'b1', costPerUnit: 1.20 },
+      { id: 'inv-3', name: 'Pintura Angelus Blanco 4oz', category: 'Pinturas', stock: 12, unit: 'piezas', minStock: 5, startDate: '2026-08-20', dailyAvgUsage: 0.3, branchId: 'b1', costPerUnit: 140.0 },
+      { id: 'inv-4', name: 'Protector Repelente Nano Hydro Spray', category: 'Aerosoles', stock: 8, unit: 'latas', minStock: 10, startDate: '2026-09-15', dailyAvgUsage: 0.5, branchId: 'b1', costPerUnit: 180.0 },
+      { id: 'inv-5', name: 'Microfibras Suaves 40x40', category: 'Herramientas', stock: 35, unit: 'piezas', minStock: 15, startDate: '2026-09-01', dailyAvgUsage: 0.8, branchId: 'b1', costPerUnit: 22.0 }
+    ];
+
+    const DEFAULT_SERVICES = [
+      { id: 's1', name: 'Limpieza Profunda Premium', price: 350, type: 'servicio', itemType: 'calzado', category: 'Limpieza', duration: '24-48h', description: 'Lavado a mano de capellada, agujetas, plantilla y desinfección.' },
+      { id: 's2', name: 'Blanqueamiento de Suela (Unyellowing)', price: 280, type: 'servicio', itemType: 'calzado', category: 'Restauración', duration: '48h', description: 'Tratamiento UV y químico de reversión de oxidación.' },
+      { id: 's3', name: 'Limpieza & Tratamiento de Gorras', price: 200, type: 'servicio', itemType: 'gorras', category: 'Limpieza', duration: '24h', description: 'Lavado con horma especial para mantener la estructura sin deformar.' },
+      { id: 's4', name: 'Limpieza Profunda de Equipaje / Mochilas', price: 450, type: 'servicio', itemType: 'equipaje', category: 'Limpieza', duration: '48h', description: 'Desinfección profunda, remoción de manchas y aromatización.' },
+      { id: 's5', name: 'Restauración de Color & Pintura', price: 600, type: 'servicio', itemType: 'calzado', category: 'Restauración', duration: '3-5 días', description: 'Repintado artesanal con pintura especializada Angelus.' },
+      { id: 's6', name: 'Protección Repelente Nanotecnología', price: 150, type: 'servicio', itemType: 'calzado', category: 'Mantenimiento', duration: 'Inmediato', description: 'Capa hidrofóbica protectora contra agua y manchas.' },
+      { id: 's7', name: 'Kit Cuidado Forever White Home', price: 420, type: 'producto', itemType: 'varios', category: 'Productos', duration: 'N/A', description: 'Cepillo, espuma limpiadora y microfibra.' }
+    ];
+
+    const DEFAULT_CUSTOMERS = [
+      { id: 'c1', name: 'Alejandro Morales', phone: '5511223344', channel: 'TikTok', branchId: 'b1', notes: 'Coleccionista de Jordan 1', dateAdded: '2026-08-10' },
+      { id: 'c2', name: 'Sofia Torres', phone: '5522334455', channel: 'Instagram', branchId: 'b1', notes: 'Prefiere entrega exprés', dateAdded: '2026-08-15' },
+      { id: 'c3', name: 'Mateo Hernández', phone: '5533445566', channel: 'Local / Transeúnte', branchId: 'b2', notes: 'Trajo 2 gorras y 1 par', dateAdded: '2026-08-20' },
+      { id: 'c4', name: 'Camila Reyes', phone: '5544556677', channel: 'Convenio / Negocio Aliado', branchId: 'b3', notes: 'Convenio SmartFit', dateAdded: '2026-09-01' }
+    ];
+
+    const DEFAULT_EXPENSES = [
+      { id: 'e1', date: '2026-09-27', amount: 1200, category: 'Insumos / Químicos', description: 'Compra de cepillos y jabón Angelus', paymentMethod: 'efectivo', branchId: 'b1' },
+      { id: 'e2', date: '2026-09-25', amount: 4500, category: 'Publicidad / Marketing', description: 'Anuncios en TikTok e Instagram', paymentMethod: 'tarjeta', branchId: 'b1' },
+      { id: 'e3', date: '2026-09-20', amount: 15000, category: 'Renta', description: 'Renta mensual local Roma Norte', paymentMethod: 'transferencia', branchId: 'b1' }
+    ];
+
+    const DEFAULT_ORDERS = [
+      {
+        id: 'ord-1001',
+        ticketNo: 'FW-2026-001',
+        customerId: 'c1',
+        customerName: 'Alejandro Morales',
+        customerPhone: '5511223344',
+        branchId: 'b1',
+        date: '2026-09-27',
+        deliveryDate: '2026-09-29',
+        paymentMethod: 'efectivo',
+        status: 'en_proceso',
+        items: [
+          { serviceId: 's1', name: 'Limpieza Profunda Premium', price: 350, qty: 2, itemType: 'calzado' },
+          { serviceId: 's2', name: 'Blanqueamiento de Suela (Unyellowing)', price: 280, qty: 1, itemType: 'calzado' }
+        ],
+        itemCounts: { calzado: 3, gorras: 0, equipaje: 0, prendas: 0 },
+        shoeNotes: 'Jordan 1 Chicago - Suela bastante amarillenta y rozadura en talón izquierdo.',
+        shoePhoto: 'https://images.unsplash.com/photo-1552346154-21d32810aba3?w=500&auto=format&fit=crop&q=60',
+        discount: 50,
+        appliedPromo: 'SNEAKER20',
+        total: 930,
+        paidAmount: 930,
+        clauses: `1. Es indispensable presentar este ticket o comprobante digital para la entrega.
+2. Transcurridos 30 días naturales sin reclamar el calzado, pasará a disposición de la empresa.
+3. No nos hacemos responsables por vicios ocultos ni telas degradadas previamente.`,
+        printedCount: 1
+      }
+    ];
+
+    const DEFAULT_CLAUSES = `1. Es indispensable presentar este ticket o comprobante digital para la entrega de sus prendas/calzado.
+2. Transcurridos 30 días naturales a partir de la fecha de entrega acordada, el calzado no reclamado pasará a disposición de la empresa.
+3. FOREVER WHITE.MX no se hace responsable por vicios ocultos en los materiales, desgaste previo por antigüedad o daño en telas ya degradadas.
+4. Garantía de satisfacción de 5 días hábiles únicamente en la calidad del lavado o retoque contratado.`;
+
+    const ACQUISITION_CHANNELS = ['TikTok', 'Instagram', 'Facebook', 'Local / Transeúnte', 'Recomendación', 'Google / Web', 'WhatsApp / Volante', 'Convenio / Negocio Aliado'];
+
+    function App() {
+      // Main App State
+      const [currentUser, setCurrentUser] = useState(DEFAULT_USERS[0]);
+      const [activeTab, setActiveTab] = useState('pos');
+      const [toast, setToast] = useState(null);
+
+      const showToast = (message, type = 'info') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 4000);
+      };
+
+      // Collections State
+      const [branches, setBranches] = useState(DEFAULT_BRANCHES);
+      const [users, setUsers] = useState(DEFAULT_USERS);
+      const [selectedBranchId, setSelectedBranchId] = useState('all');
+      const [services, setServices] = useState(DEFAULT_SERVICES);
+      const [customers, setCustomers] = useState(DEFAULT_CUSTOMERS);
+      const [expenses, setExpenses] = useState(DEFAULT_EXPENSES);
+      const [orders, setOrders] = useState(DEFAULT_ORDERS);
+      const [inventory, setInventory] = useState(DEFAULT_INVENTORY);
+      const [discountCodes, setDiscountCodes] = useState(DEFAULT_DISCOUNT_CODES);
+      const [convenios, setConvenios] = useState(DEFAULT_CONVENIOS);
+      const [ticketClauses, setTicketClauses] = useState(DEFAULT_CLAUSES);
+
+      // Filter & Timeframe State
+      const [reportTimeframe, setReportTimeframe] = useState('day');
+      const [selectedChannels, setSelectedChannels] = useState(ACQUISITION_CHANNELS);
+
+      // POS Form State
+      const [posCustomerSearch, setPosCustomerSearch] = useState('');
+      const [posSelectedCustomer, setPosSelectedCustomer] = useState(null);
+      const [posBranchId, setPosBranchId] = useState('b1');
+      const [posItems, setPosItems] = useState([]);
+      const [posDiscount, setPosDiscount] = useState(0);
+      const [posPromoCode, setPosPromoCode] = useState('');
+      const [posSelectedConvenioId, setPosSelectedConvenioId] = useState('');
+      const [posPaymentMethod, setPosPaymentMethod] = useState('efectivo');
+      const [posShoeNotes, setPosShoeNotes] = useState('');
+      const [posShoePhoto, setPosShoePhoto] = useState('');
+      const [posDeliveryDate, setPosDeliveryDate] = useState(() => {
+        const d = new Date(); d.setDate(d.getDate() + 2);
+        return d.toISOString().split('T')[0];
+      });
+      const [posPaidAmount, setPosPaidAmount] = useState(0);
+      const [activeTicket, setActiveTicket] = useState(null);
+
+      // Item Category Counts State for POS
+      const [posItemCounts, setPosItemCounts] = useState({ calzado: 1, gorras: 0, equipaje: 0, prendas: 0 });
+
+      // Modals
+      const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+      const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
+      const [showAddServiceModal, setShowAddServiceModal] = useState(false);
+      const [showAddBranchModal, setShowAddBranchModal] = useState(false);
+      const [showAddUserModal, setShowAddUserModal] = useState(false);
+      const [showAddPromoModal, setShowAddPromoModal] = useState(false);
+      const [showAddConvenioModal, setShowAddConvenioModal] = useState(false);
+      const [showLoginModal, setShowLoginModal] = useState(false);
+      const [ticketImageModal, setTicketImageModal] = useState(null);
+      const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+      // Form Models
+      const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', channel: 'TikTok', notes: '', branchId: 'b1' });
+      const [newExpense, setNewExpense] = useState({ amount: '', category: 'Insumos / Químicos', description: '', paymentMethod: 'efectivo', branchId: 'b1', date: new Date().toISOString().split('T')[0] });
+      const [newService, setNewService] = useState({ name: '', price: '', type: 'servicio', itemType: 'calzado', category: 'Limpieza', duration: '24-48h', description: '' });
+      const [newBranch, setNewBranch] = useState({ name: '', address: '', phone: '', manager: '' });
+      const [newUser, setNewUser] = useState({ email: '', name: '', role: 'cashier', branchId: 'b1' });
+      const [newPromo, setNewPromo] = useState({ code: '', percent: '', description: '' });
+      const [newConvenio, setNewConvenio] = useState({ name: '', discountPercent: '', contact: '' });
+      const [loginEmailInput, setLoginEmailInput] = useState('');
+
+      // Filtered Orders & Calculations
+      const filteredOrdersByTimeframe = useMemo(() => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const now = new Date();
+
+        return orders.filter(order => {
+          if (selectedBranchId !== 'all' && order.branchId !== selectedBranchId) return false;
+          const cust = customers.find(c => c.id === order.customerId);
+          const custChannel = cust ? cust.channel : 'Local / Transeúnte';
+          if (!selectedChannels.includes(custChannel)) return false;
+
+          const orderDate = new Date(order.date);
+          if (reportTimeframe === 'day') return order.date === todayStr;
+          if (reportTimeframe === 'week') {
+            const diffDays = Math.ceil(Math.abs(now - orderDate) / (1000 * 60 * 60 * 24));
+            return diffDays <= 7;
+          }
+          if (reportTimeframe === 'month') return orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
+          if (reportTimeframe === 'year') return orderDate.getFullYear() === now.getFullYear();
+          return true;
+        });
+      }, [orders, reportTimeframe, selectedBranchId, selectedChannels, customers]);
+
+      const filteredExpensesByTimeframe = useMemo(() => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const now = new Date();
+
+        return expenses.filter(exp => {
+          if (selectedBranchId !== 'all' && exp.branchId !== selectedBranchId) return false;
+          const expDate = new Date(exp.date);
+          if (reportTimeframe === 'day') return exp.date === todayStr;
+          if (reportTimeframe === 'week') {
+            const diffDays = Math.ceil(Math.abs(now - expDate) / (1000 * 60 * 60 * 24));
+            return diffDays <= 7;
+          }
+          if (reportTimeframe === 'month') return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
+          if (reportTimeframe === 'year') return expDate.getFullYear() === now.getFullYear();
+          return true;
+        });
+      }, [expenses, reportTimeframe, selectedBranchId]);
+
+      // Metrics Computation
+      const financialMetrics = useMemo(() => {
+        let totalRevenue = 0, cashTotal = 0, cardTotal = 0, transferTotal = 0;
+        let itemTotals = { calzado: 0, gorras: 0, equipaje: 0, prendas: 0 };
+        let serviceUsageMap = {};
+
+        filteredOrdersByTimeframe.forEach(ord => {
+          const amt = Number(ord.total) || 0;
+          totalRevenue += amt;
+          if (ord.paymentMethod === 'efectivo') cashTotal += amt;
+          else if (ord.paymentMethod === 'tarjeta') cardTotal += amt;
+          else if (ord.paymentMethod === 'transferencia') transferTotal += amt;
+
+          if (ord.itemCounts) {
+            itemTotals.calzado += (ord.itemCounts.calzado || 0);
+            itemTotals.gorras += (ord.itemCounts.gorras || 0);
+            itemTotals.equipaje += (ord.itemCounts.equipaje || 0);
+            itemTotals.prendas += (ord.itemCounts.prendas || 0);
+          }
+
+          if (ord.items) {
+            ord.items.forEach(item => {
+              serviceUsageMap[item.name] = (serviceUsageMap[item.name] || 0) + (item.qty || 1);
+            });
+          }
+        });
+
+        const totalExpenses = filteredExpensesByTimeframe.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
+        const netProfit = totalRevenue - totalExpenses;
+        const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0;
+
+        // Find top service
+        let topServiceName = "N/A";
+        let topServiceCount = 0;
+        Object.keys(serviceUsageMap).forEach(sName => {
+          if (serviceUsageMap[sName] > topServiceCount) {
+            topServiceCount = serviceUsageMap[sName];
+            topServiceName = sName;
+          }
+        });
+
+        // Channel acquisition count
+        let channelCountMap = {};
+        customers.forEach(c => {
+          channelCountMap[c.channel] = (channelCountMap[c.channel] || 0) + 1;
+        });
+
+        return { 
+          totalRevenue, cashTotal, cardTotal, transferTotal, totalExpenses, 
+          netProfit, profitMargin, itemTotals, topServiceName, topServiceCount,
+          serviceUsageMap, channelCountMap
+        };
+      }, [filteredOrdersByTimeframe, filteredExpensesByTimeframe, customers]);
+
+      // POS Handlers
+      const handleAddPosItem = (service) => {
+        setPosItems(prev => {
+          const exists = prev.find(i => i.serviceId === service.id);
+          if (exists) {
+            return prev.map(i => i.serviceId === service.id ? { ...i, qty: i.qty + 1 } : i);
+          }
+          return [...prev, { serviceId: service.id, name: service.name, price: service.price, qty: 1, itemType: service.itemType || 'calzado' }];
+        });
+      };
+
+      const handleRemovePosItem = (serviceId) => {
+        setPosItems(prev => prev.filter(i => i.serviceId !== serviceId));
+      };
+
+      const handleUpdateItemQty = (serviceId, qty) => {
+        if (qty <= 0) {
+          handleRemovePosItem(serviceId);
+          return;
+        }
+        setPosItems(prev => prev.map(i => i.serviceId === serviceId ? { ...i, qty } : i));
+      };
+
+      const posSubtotal = useMemo(() => posItems.reduce((sum, i) => sum + (i.price * i.qty), 0), [posItems]);
+
+      // Calculate total discount combining manual discount, promo codes & convenios
+      const computedDiscount = useMemo(() => {
+        let disc = Number(posDiscount) || 0;
+        if (posPromoCode) {
+          const promo = discountCodes.find(d => d.code.toUpperCase() === posPromoCode.trim().toUpperCase());
+          if (promo) disc += (posSubtotal * (promo.percent / 100));
+        }
+        if (posSelectedConvenioId) {
+          const conv = convenios.find(c => c.id === posSelectedConvenioId);
+          if (conv) disc += (posSubtotal * (conv.discountPercent / 100));
+        }
+        return Math.min(posSubtotal, disc);
+      }, [posSubtotal, posDiscount, posPromoCode, posSelectedConvenioId, discountCodes, convenios]);
+
+      const posTotal = useMemo(() => Math.max(0, posSubtotal - computedDiscount), [posSubtotal, computedDiscount]);
+
+      const handleShoePhotoUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => setPosShoePhoto(reader.result);
+          reader.readAsDataURL(file);
+        }
+      };
+
+      const handleCreateOrder = (e) => {
+        e.preventDefault();
+        if (!posSelectedCustomer) {
+          showToast('⚠️ Selecciona o agrega un cliente primero.', 'warning');
+          return;
+        }
+        if (posItems.length === 0) {
+          showToast('⚠️ Agrega al menos un servicio o producto al recibo.', 'warning');
+          return;
+        }
+
+        const ticketNo = `FW-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`;
+        const newOrd = {
+          id: `ord-${Date.now()}`,
+          ticketNo,
+          customerId: posSelectedCustomer.id,
+          customerName: posSelectedCustomer.name,
+          customerPhone: posSelectedCustomer.phone,
+          branchId: posBranchId,
+          date: new Date().toISOString().split('T')[0],
+          deliveryDate: posDeliveryDate,
+          paymentMethod: posPaymentMethod,
+          status: 'en_proceso',
+          items: posItems,
+          itemCounts: { ...posItemCounts },
+          shoeNotes: posShoeNotes,
+          shoePhoto: posShoePhoto,
+          discount: computedDiscount,
+          appliedPromo: posPromoCode || (posSelectedConvenioId ? 'Convenio' : 'N/A'),
+          total: posTotal,
+          paidAmount: Number(posPaidAmount) || posTotal,
+          clauses: ticketClauses,
+          printedCount: 0
+        };
+
+        setOrders([newOrd, ...orders]);
+        setActiveTicket(newOrd);
+
+        setPosItems([]);
+        setPosDiscount(0);
+        setPosPromoCode('');
+        setPosSelectedConvenioId('');
+        setPosShoeNotes('');
+        setPosShoePhoto('');
+        setPosPaidAmount(0);
+
+        showToast(`✅ Recibo ${ticketNo} guardado con éxito!`, 'success');
+      };
+
+      const handlePrintThermalTicket = (ticketToPrint) => {
+        if (!ticketToPrint) return;
+
+        if (currentUser.role === 'cashier' && ticketToPrint.printedCount >= 1) {
+          showToast('🔒 ACCESO RESTRINGIDO: Este recibo ya fue impreso 1 vez. Solo el Administrador puede reimprimir.', 'error');
+          return;
+        }
+
+        const updatedOrders = orders.map(o => o.id === ticketToPrint.id ? { ...o, printedCount: (o.printedCount || 0) + 1 } : o);
+        setOrders(updatedOrders);
+
+        if (activeTicket && activeTicket.id === ticketToPrint.id) {
+          setActiveTicket({ ...activeTicket, printedCount: (activeTicket.printedCount || 0) + 1 });
+        }
+
+        window.print();
+      };
+
+      const handleGenerateTicketImage = async (ticketToCapture) => {
+        const targetTicket = ticketToCapture || activeTicket || orders[0];
+        if (!targetTicket) {
+          showToast('⚠️ No hay ningún recibo activo para capturar.', 'warning');
+          return;
+        }
+        setIsGeneratingImage(true);
+        try {
+          const element = document.getElementById('digital-photo-ticket-card');
+          if (!element) {
+            showToast('⚠️ No se encontró el área del ticket digital.', 'warning');
+            setIsGeneratingImage(false);
+            return;
+          }
+
+          const canvas = await window.html2canvas(element, { scale: 3, backgroundColor: '#080214', useCORS: true, logging: false });
+          const imageUrl = canvas.toDataURL('image/png');
+
+          canvas.toBlob((blob) => {
+            setTicketImageModal({ imageUrl, blob, ticket: targetTicket });
+            setIsGeneratingImage(false);
+            showToast('📷 Foto del ticket generada con éxito!', 'success');
+          }, 'image/png');
+
+        } catch (err) {
+          console.error(err);
+          showToast('❌ Error al generar la foto del ticket.', 'error');
+          setIsGeneratingImage(false);
+        }
+      };
+
+      const handleOpenWhatsAppChat = (ticket) => {
+        const target = ticket || activeTicket || orders[0];
+        if (!target) return;
+
+        const itemsText = target.items.map(i => `• ${i.name} (x${i.qty})`).join('\n');
+        const text = `✨ *FOREVER WHITE.MX - RECIBO OFICIAL DE SERVICIO* ✨\n\n` +
+          `Hola *${target.customerName}*, te compartimos los detalles de tu servicio:\n\n` +
+          `📋 *Folio:* ${target.ticketNo}\n` +
+          `📅 *Fecha Recepción:* ${target.date}\n` +
+          `📦 *Entrega Estimada:* ${target.deliveryDate}\n\n` +
+          `👟 *Servicios y Artículos:*\n${itemsText}\n\n` +
+          `💰 *Total:* $${target.total} MXN\n` +
+          `💵 *Anticipo Pagado:* $${target.paidAmount} MXN\n` +
+          `📌 *Saldo Pendiente:* $${target.total - target.paidAmount} MXN\n\n` +
+          `📍 *Sucursal:* ${branches.find(b => b.id === target.branchId)?.name || 'FOREVER WHITE.MX'}\n\n` +
+          `¡Gracias por tu confianza! 👟✨`;
+
+        const url = `https://wa.me/52${target.customerPhone}?text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank');
+      };
+
+      const handleSaveCustomer = (e) => {
+        e.preventDefault();
+        if (!newCustomer.name || !newCustomer.phone) return;
+        const created = { id: `c-${Date.now()}`, ...newCustomer, dateAdded: new Date().toISOString().split('T')[0] };
+        setCustomers([created, ...customers]);
+        setShowAddCustomerModal(false);
+        setNewCustomer({ name: '', phone: '', channel: 'TikTok', notes: '', branchId: 'b1' });
+        if (activeTab === 'pos') setPosSelectedCustomer(created);
+        showToast('👤 Cliente registrado correctamente.', 'success');
+      };
+
+      const handleSaveBranch = (e) => {
+        e.preventDefault();
+        if (!newBranch.name || !newBranch.address) {
+          showToast('⚠️️ Nombre y dirección son obligatorios.', 'warning');
+          return;
+        }
+        const created = { id: `b-${Date.now()}`, ...newBranch };
+        setBranches([...branches, created]);
+        setShowAddBranchModal(false);
+        setNewBranch({ name: '', address: '', phone: '', manager: '' });
+        showToast('🏢 Sucursal registrada con éxito!', 'success');
+      };
+
+      const handleSaveUser = (e) => {
+        e.preventDefault();
+        if (!newUser.email || !newUser.name) return;
+        const created = { id: `u-${Date.now()}`, ...newUser };
+        setUsers([...users, created]);
+        setShowAddUserModal(false);
+        setNewUser({ email: '', name: '', role: 'cashier', branchId: 'b1' });
+        showToast('✉️ Usuario y permisos agregados con éxito!', 'success');
+      };
+
+      const handleLoginByEmail = (e) => {
+        e.preventDefault();
+        const found = users.find(u => u.email.toLowerCase() === loginEmailInput.trim().toLowerCase());
+        if (found) {
+          setCurrentUser(found);
+          setShowLoginModal(false);
+          setLoginEmailInput('');
+          showToast(`🔓 Sesión iniciada como: ${found.name} (${found.role.toUpperCase()})`, 'success');
+        } else {
+          showToast('❌ Correo no registrado. Solicita acceso al Administrador.', 'error');
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col md:flex-row bg-[#03000a] text-slate-100 font-sans antialiased">
+          
+          {/* TOAST NOTIFICATION */}
+          {toast && (
+            <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl shadow-2xl font-bold text-xs flex items-center gap-2 border transition backdrop-blur-md ${
+              toast.type === 'error' ? 'bg-rose-950/90 border-rose-800 text-rose-200' :
+              toast.type === 'warning' ? 'bg-amber-950/90 border-amber-800 text-amber-200' :
+              'bg-purple-950/90 border-purple-800 text-purple-200'
+            }`}>
+              <Icon name="alertTriangle" className="w-4 h-4 shrink-0" />
+              <span>{toast.message}</span>
+            </div>
+          )}
+
+          {/* SIDEBAR NAVIGATION */}
+          <aside className="w-full md:w-64 bg-[#080214] border-r border-purple-950/80 flex flex-col shrink-0">
+            
+            {/* BRAND HEADER */}
+            <div className="p-5 border-b border-purple-950/80 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <img 
+                  src={LOGO_URL} 
+                  alt="Forever White Logo" 
+                  className="w-10 h-10 object-contain rounded-xl border border-purple-500/30 p-0.5 bg-black" 
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <div>
+                  <h1 className="font-black text-sm tracking-tight text-white uppercase leading-none">
+                    FOREVER <span className="text-purple-400">WHITE.MX</span>
+                  </h1>
+                  <p className="text-[9px] text-purple-300/70 tracking-widest font-mono mt-1">SUITE PROFESIONAL</p>
+                </div>
+              </div>
+            </div>
+
+            {/* USER LOGIN & ROLE BADGE */}
+            <div className="p-3 mx-3 mt-3 rounded-2xl bg-[#03000a] border border-purple-900/50 space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-semibold text-purple-200">
+                <span className="flex items-center gap-1.5 truncate">
+                  <Icon name="mail" className="w-3.5 h-3.5 text-purple-400 shrink-0" /> 
+                  <span className="truncate">{currentUser.name}</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-bold shrink-0 ${
+                  currentUser.role === 'admin' ? 'bg-purple-950 text-purple-300 border border-purple-700' :
+                  currentUser.role === 'cashier' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                  'bg-slate-900 text-slate-300 border border-slate-700'
+                }`}>
+                  {currentUser.role}
+                </span>
+              </div>
+              <p className="text-[10px] text-purple-300/60 truncate font-mono">{currentUser.email}</p>
+              
+              <button 
+                onClick={() => setShowLoginModal(true)} 
+                className="w-full py-1.5 bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-800/80 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1.5 transition"
+              >
+                <Icon name="userCheck" className="w-3 h-3" /> Cambiar / Entrar por Correo
+              </button>
+            </div>
+
+            {/* SUCURSAL SELECTOR */}
+            <div className="p-3 mx-3 mt-2 rounded-2xl bg-[#03000a] border border-purple-900/40 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-purple-300/80 block">Sucursal Atendiendo</label>
+                {currentUser.role === 'admin' && (
+                  <button onClick={() => setShowAddBranchModal(true)} className="text-[10px] text-purple-400 font-bold hover:text-purple-300 flex items-center gap-0.5">
+                    <Icon name="plus" className="w-3 h-3" /> Agregar
+                  </button>
+                )}
+              </div>
+              <select 
+                value={selectedBranchId} 
+                onChange={e => setSelectedBranchId(e.target.value)}
+                className="w-full bg-[#0d051d] border border-purple-900/60 rounded-xl text-xs py-1.5 px-2 text-slate-200 font-semibold focus:outline-none focus:border-purple-500"
+              >
+                <option value="all">🌐 Todas las Sucursales ({branches.length})</option>
+                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+
+            {/* NAV LINKS */}
+            <nav className="p-3 space-y-1 flex-1 mt-2 font-medium text-xs">
+              <button onClick={() => setActiveTab('pos')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'pos' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                <Icon name="fileText" /> Nuevo Recibo / POS
+              </button>
+              
+              <button onClick={() => setActiveTab('crm')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'crm' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                <Icon name="users" /> CRM Clientes
+              </button>
+
+              {currentUser.role === 'admin' && (
+                <React.Fragment>
+                  <button onClick={() => setActiveTab('branches')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'branches' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                    <Icon name="store" /> Sucursales ({branches.length})
+                  </button>
+                  <button onClick={() => setActiveTab('reports')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'reports' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                    <Icon name="barChart" /> Reportes & Métricas
+                  </button>
+                  <button onClick={() => setActiveTab('inventory')} className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition ${activeTab === 'inventory' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                    <span className="flex items-center gap-3"><Icon name="box" /> Inventario & Consumos</span>
+                  </button>
+                  <button onClick={() => setActiveTab('expenses')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'expenses' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                    <Icon name="trendingDown" /> Gastos & Egresos
+                  </button>
+                  <button onClick={() => setActiveTab('promos')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'promos' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                    <Icon name="tag" /> Códigos & Convenios
+                  </button>
+                </React.Fragment>
+              )}
+
+              <button onClick={() => setActiveTab('catalog')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'catalog' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                <Icon name="shoppingBag" /> Servicios & Productos
+              </button>
+
+              {currentUser.role === 'admin' && (
+                <button onClick={() => setActiveTab('team')} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'team' ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold' : 'text-slate-400 hover:bg-purple-950/30 hover:text-white'}`}>
+                  <Icon name="shield" /> Equipo & Roles
+                </button>
+              )}
+            </nav>
+          </aside>
+
+          {/* MAIN CONTENT AREA */}
+          <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-[#03000a]">
+            
+            {/* POS MODULE */}
+            {activeTab === 'pos' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* POS FORM */}
+                <div className="lg:col-span-7 space-y-5">
+                  <div className="flex justify-between items-center pb-3 border-b border-purple-950/80">
+                    <div>
+                      <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                        <Icon name="fileText" className="text-purple-400" /> Nuevo Recibo de Atención
+                      </h2>
+                      <p className="text-xs text-purple-300/70">FOREVER WHITE.MX - Control de Recepción de Artículos</p>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleCreateOrder} className="space-y-4">
+                    
+                    {/* Branch & Delivery Date */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 bg-[#080214] rounded-2xl border border-purple-950/80">
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="text-[10px] font-bold text-purple-300/80 uppercase">Sucursal Atendiendo</label>
+                          {currentUser.role === 'admin' && (
+                            <button type="button" onClick={() => setShowAddBranchModal(true)} className="text-[10px] text-purple-400 font-bold hover:underline">+ Nueva</button>
+                          )}
+                        </div>
+                        <select value={posBranchId} onChange={e => setPosBranchId(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white focus:border-purple-500">
+                          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-purple-300/80 uppercase block mb-1">Fecha Promesa de Entrega</label>
+                        <input type="date" value={posDeliveryDate} onChange={e => setPosDeliveryDate(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white focus:border-purple-500" />
+                      </div>
+                    </div>
+
+                    {/* Customer Selection */}
+                    <div className="p-4 bg-[#080214] rounded-2xl border border-purple-950/80 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-purple-300/80 uppercase">Cliente Asignado</span>
+                        <button type="button" onClick={() => setShowAddCustomerModal(true)} className="text-xs text-purple-400 font-bold flex items-center gap-1 hover:text-purple-300">
+                          <Icon name="plus" className="w-3.5 h-3.5" /> Registrar Nuevo
+                        </button>
+                      </div>
+
+                      <div className="relative">
+                        <Icon name="search" className="w-4 h-4 absolute left-3 top-2.5 text-purple-500" />
+                        <input type="text" placeholder="Buscar por nombre o teléfono..." value={posCustomerSearch} onChange={e => setPosCustomerSearch(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:border-purple-500" />
+                      </div>
+
+                      {posCustomerSearch && (
+                        <div className="max-h-36 overflow-y-auto bg-[#03000a] border border-purple-900/80 rounded-xl divide-y divide-purple-900/40">
+                          {customers.filter(c => c.name.toLowerCase().includes(posCustomerSearch.toLowerCase()) || c.phone.includes(posCustomerSearch)).map(c => (
+                            <div key={c.id} onClick={() => { setPosSelectedCustomer(c); setPosCustomerSearch(''); }} className="p-2.5 hover:bg-purple-900/30 cursor-pointer flex justify-between text-xs">
+                              <div>
+                                <p className="font-bold text-white">{c.name}</p>
+                                <p className="text-[10px] text-purple-300/60">📱 {c.phone} | Conoció por: {c.channel}</p>
+                              </div>
+                              <span className="text-purple-400 font-bold">Seleccionar</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {posSelectedCustomer ? (
+                        <div className="p-3 bg-purple-950/40 border border-purple-800 rounded-xl flex justify-between items-center text-xs">
+                          <div>
+                            <p className="font-bold text-purple-300">{posSelectedCustomer.name}</p>
+                            <p className="text-[10px] text-purple-300/60">Tel: {posSelectedCustomer.phone} | Canal: {posSelectedCustomer.channel}</p>
+                          </div>
+                          <button type="button" onClick={() => setPosSelectedCustomer(null)} className="text-slate-400 hover:text-rose-400">
+                            <Icon name="x" className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-amber-400/90 italic">⚠️️ Selecciona o agrega un cliente para emitir el recibo.</p>
+                      )}
+                    </div>
+
+                    {/* Quantity by Item Type (Calzado, Gorras, Equipaje) */}
+                    <div className="p-4 bg-[#080214] rounded-2xl border border-purple-950/80 space-y-3">
+                      <span className="text-[10px] font-bold text-purple-300/80 uppercase block">Conteo de Artículos Recibidos</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="p-2.5 bg-[#03000a] border border-purple-900/60 rounded-xl text-center space-y-1">
+                          <span className="text-xs font-bold text-purple-200">👟 Calzado</span>
+                          <div className="flex items-center justify-center gap-2">
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, calzado: Math.max(0, p.calzado - 1) }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">-</button>
+                            <span className="font-mono text-sm font-bold text-white">{posItemCounts.calzado}</span>
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, calzado: p.calzado + 1 }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">+</button>
+                          </div>
+                        </div>
+                        <div className="p-2.5 bg-[#03000a] border border-purple-900/60 rounded-xl text-center space-y-1">
+                          <span className="text-xs font-bold text-purple-200">🧢 Gorras</span>
+                          <div className="flex items-center justify-center gap-2">
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, gorras: Math.max(0, p.gorras - 1) }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">-</button>
+                            <span className="font-mono text-sm font-bold text-white">{posItemCounts.gorras}</span>
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, gorras: p.gorras + 1 }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">+</button>
+                          </div>
+                        </div>
+                        <div className="p-2.5 bg-[#03000a] border border-purple-900/60 rounded-xl text-center space-y-1">
+                          <span className="text-xs font-bold text-purple-200">🧳 Equipaje</span>
+                          <div className="flex items-center justify-center gap-2">
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, equipaje: Math.max(0, p.equipaje - 1) }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">-</button>
+                            <span className="font-mono text-sm font-bold text-white">{posItemCounts.equipaje}</span>
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, equipaje: p.equipaje + 1 }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">+</button>
+                          </div>
+                        </div>
+                        <div className="p-2.5 bg-[#03000a] border border-purple-900/60 rounded-xl text-center space-y-1">
+                          <span className="text-xs font-bold text-purple-200">👕 Varios</span>
+                          <div className="flex items-center justify-center gap-2">
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, prendas: Math.max(0, p.prendas - 1) }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">-</button>
+                            <span className="font-mono text-sm font-bold text-white">{posItemCounts.prendas}</span>
+                            <button type="button" onClick={() => setPosItemCounts(p => ({ ...p, prendas: p.prendas + 1 }))} className="w-5 h-5 bg-purple-950 rounded text-xs font-bold text-purple-300">+</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Services Selection */}
+                    <div className="p-4 bg-[#080214] rounded-2xl border border-purple-950/80 space-y-3">
+                      <span className="text-[10px] font-bold text-purple-300/80 uppercase block">Selección de Servicios y Productos</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                        {services.map(srv => (
+                          <button key={srv.id} type="button" onClick={() => handleAddPosItem(srv)} className="p-2.5 bg-[#03000a] border border-purple-900/50 hover:border-purple-500 text-left rounded-xl transition text-xs flex justify-between items-center group">
+                            <div>
+                              <p className="font-bold text-white group-hover:text-purple-300">{srv.name}</p>
+                              <p className="text-[10px] text-purple-300/70">${srv.price} MXN | {srv.category}</p>
+                            </div>
+                            <Icon name="plus" className="text-purple-400" />
+                          </button>
+                        ))}
+                      </div>
+
+                      {posItems.length > 0 && (
+                        <div className="pt-2 border-t border-purple-900/60 space-y-2">
+                          {posItems.map(item => (
+                            <div key={item.serviceId} className="p-2 bg-[#03000a] border border-purple-900/60 rounded-xl flex justify-between items-center text-xs">
+                              <span className="font-semibold text-white">{item.name}</span>
+                              <div className="flex items-center gap-2">
+                                <button type="button" onClick={() => handleUpdateItemQty(item.serviceId, item.qty - 1)} className="w-5 h-5 bg-purple-950 rounded text-purple-300 font-bold">-</button>
+                                <span className="font-mono text-purple-300">{item.qty}</span>
+                                <button type="button" onClick={() => handleUpdateItemQty(item.serviceId, item.qty + 1)} className="w-5 h-5 bg-purple-950 rounded text-purple-300 font-bold">+</button>
+                                <span className="font-bold text-purple-300 font-mono w-16 text-right">${item.price * item.qty}</span>
+                                <button type="button" onClick={() => handleRemovePosItem(item.serviceId)} className="text-rose-400">
+                                  <Icon name="trash" className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Photo Upload & Observaciones */}
+                    <div className="p-4 bg-[#080214] rounded-2xl border border-purple-950/80 space-y-3">
+                      <span className="text-[10px] font-bold text-purple-300/80 uppercase block">Evidencia Fotográfica & Detalles Previos</span>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <textarea rows={3} placeholder="Detalles de raspaduras, manchas, desgaste previo o anotaciones..." value={posShoeNotes} onChange={e => setPosShoeNotes(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white focus:border-purple-500" />
+                        <div className="border-2 border-dashed border-purple-900/60 rounded-xl p-3 bg-[#03000a] flex flex-col items-center justify-center relative">
+                          {posShoePhoto ? (
+                            <div className="relative w-full h-24">
+                              <img src={posShoePhoto} alt="Evidencia" className="w-full h-full object-cover rounded-lg" />
+                              <button type="button" onClick={() => setPosShoePhoto('')} className="absolute top-1 right-1 p-1 bg-black/80 rounded-full text-rose-400">
+                                <Icon name="x" className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <label className="cursor-pointer flex flex-col items-center">
+                              <Icon name="camera" className="w-6 h-6 text-purple-400 mb-1" />
+                              <span className="text-xs text-purple-200 font-bold">Tomar / Cargar Foto</span>
+                              <input type="file" accept="image/*" onChange={handleShoePhotoUpload} className="hidden" />
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Discounts, Promos & Convenios */}
+                    <div className="p-4 bg-[#080214] rounded-2xl border border-purple-950/80 space-y-3">
+                      <span className="text-[10px] font-bold text-purple-300/80 uppercase block">Promociones & Convenios de Fidelización</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Código Promocional</label>
+                          <input type="text" placeholder="Ej. BIENVENIDA" value={posPromoCode} onChange={e => setPosPromoCode(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-1.5 text-xs text-white uppercase font-mono" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Convenio / Aliado</label>
+                          <select value={posSelectedConvenioId} onChange={e => setPosSelectedConvenioId(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-1.5 text-xs text-white">
+                            <option value="">Sin convenio</option>
+                            {convenios.map(c => <option key={c.id} value={c.id}>{c.name} (-{c.discountPercent}%)</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Descuento Directo ($)</label>
+                          <input type="number" value={posDiscount} onChange={e => setPosDiscount(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-1.5 text-xs text-white" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 pt-2">
+                        <div>
+                          <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Anticipo Pagado ($)</label>
+                          <input type="number" value={posPaidAmount} onChange={e => setPosPaidAmount(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-1.5 text-xs text-white font-bold" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Forma de Pago</label>
+                          <select value={posPaymentMethod} onChange={e => setPosPaymentMethod(e.target.value)} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-1.5 text-xs text-white">
+                            <option value="efectivo">💵 Efectivo</option>
+                            <option value="tarjeta">💳 Tarjeta</option>
+                            <option value="transferencia">📲 Transferencia</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-purple-900/60 flex justify-between items-center">
+                        <div>
+                          <p className="text-xs text-purple-300/70">Total a Cobrar:</p>
+                          <p className="text-2xl font-black text-purple-400 font-mono">${posTotal} MXN</p>
+                        </div>
+                        <button type="submit" className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-900/50 flex items-center gap-1.5">
+                          <Icon name="check" /> Guardar Recibo
+                        </button>
+                      </div>
+                    </div>
+
+                  </form>
+                </div>
+
+                {/* DIGITAL PHOTO TICKET PREVIEW CARD */}
+                <div className="lg:col-span-5 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs font-bold text-purple-300/80 uppercase flex items-center gap-2">
+                      <Icon name="sparkles" className="text-purple-400" /> Foto Ticket Digital FOREVER WHITE.MX
+                    </h3>
+                  </div>
+
+                  {/* HIGH END STYLED CARD FOR INSTANT PHOTO GENERATION */}
+                  <div id="digital-photo-ticket-card" className="p-6 rounded-3xl bg-[#080214] border-2 border-purple-500/40 shadow-2xl space-y-4 glow-purple relative overflow-hidden">
+                    
+                    {/* Glowing Header */}
+                    <div className="flex justify-between items-start border-b border-purple-900/60 pb-3">
+                      <div className="flex items-center gap-3">
+                        <img src={LOGO_URL} alt="Logo" className="w-12 h-12 object-contain bg-black rounded-xl p-1 border border-purple-500/40" onError={(e) => { e.target.style.display = 'none'; }} />
+                        <div>
+                          <h1 className="text-base font-black tracking-wider text-white">FOREVER WHITE.MX</h1>
+                          <p className="text-[9px] text-purple-400 tracking-widest font-mono">RECIBO OFICIAL DIGITAL</p>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 bg-purple-950 border border-purple-700 text-purple-300 text-[10px] font-mono font-bold rounded-full">
+                        {activeTicket?.ticketNo || 'FW-2026-TEMP'}
+                      </span>
+                    </div>
+
+                    {/* Customer & Delivery Data */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px] bg-[#03000a] p-3 rounded-2xl border border-purple-900/40 font-mono">
+                      <div>
+                        <span className="text-[9px] text-purple-400 font-bold uppercase block">CLIENTE</span>
+                        <span className="font-bold text-white truncate block">{activeTicket?.customerName || posSelectedCustomer?.name || 'Cliente Mostrador'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-purple-400 font-bold uppercase block">ENTREGA ESTIMADA</span>
+                        <span className="font-bold text-purple-300 block">{activeTicket?.deliveryDate || posDeliveryDate}</span>
+                      </div>
+                    </div>
+
+                    {/* Quantities Badges */}
+                    <div className="flex gap-2 text-[10px] font-bold">
+                      <span className="px-2.5 py-1 bg-purple-950/80 border border-purple-800 text-purple-200 rounded-lg">👟 {activeTicket?.itemCounts?.calzado || posItemCounts.calzado} pares</span>
+                      <span className="px-2.5 py-1 bg-purple-950/80 border border-purple-800 text-purple-200 rounded-lg">🧢 {activeTicket?.itemCounts?.gorras || posItemCounts.gorras} gorras</span>
+                      <span className="px-2.5 py-1 bg-purple-950/80 border border-purple-800 text-purple-200 rounded-lg">🧳 {activeTicket?.itemCounts?.equipaje || posItemCounts.equipaje} equipaje</span>
+                    </div>
+
+                    {/* Itemized Services */}
+                    <div className="space-y-1.5 border-t border-b border-purple-900/60 py-3">
+                      {(activeTicket ? activeTicket.items : posItems).map((i, idx) => (
+                        <div key={idx} className="flex justify-between text-xs font-medium">
+                          <span className="text-slate-200">{i.qty}x {i.name}</span>
+                          <span className="font-mono text-purple-300 font-bold">${i.price * i.qty}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Shoe Evidence Image Preview */}
+                    {(activeTicket?.shoePhoto || posShoePhoto) && (
+                      <div className="space-y-1 text-center">
+                        <span className="text-[9px] text-purple-300 uppercase font-bold block">EVIDENCIA FOTOGRÁFICA PREVIA</span>
+                        <img src={activeTicket?.shoePhoto || posShoePhoto} alt="Evidencia" className="w-full h-32 object-cover rounded-2xl border border-purple-800" />
+                      </div>
+                    )}
+
+                    {/* Totals & Savings */}
+                    <div className="pt-1 flex justify-between items-center text-sm font-black">
+                      <span className="text-slate-300">TOTAL:</span>
+                      <span className="text-xl text-purple-400 font-mono">${activeTicket?.total || posTotal} MXN</span>
+                    </div>
+
+                    {/* Direct WhatsApp Redirect & Action Buttons */}
+                    <div className="space-y-2 pt-2 border-t border-purple-900/60">
+                      <button onClick={() => handleOpenWhatsAppChat(activeTicket || orders[0])} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow">
+                        <Icon name="messageCircle" /> 📲 Enviar por WhatsApp Directo
+                      </button>
+                      <button onClick={() => handleGenerateTicketImage(activeTicket || orders[0])} disabled={isGeneratingImage} className="w-full py-2 bg-purple-950 hover:bg-purple-900 text-purple-200 font-bold text-xs rounded-xl border border-purple-800 flex items-center justify-center gap-2">
+                        <Icon name="camera" /> Generar Foto HD para Enviar
+                      </button>
+                      <button onClick={() => handlePrintThermalTicket(activeTicket || orders[0])} className="w-full py-2 bg-[#03000a] text-slate-300 hover:text-white font-bold text-xs rounded-xl border border-purple-950 flex items-center justify-center gap-2">
+                        <Icon name="printer" /> Imprimir en Ticketera Térmica
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* SUCURSALES MODULE */}
+            {activeTab === 'branches' && currentUser.role === 'admin' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center pb-3 border-b border-purple-950/80">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <Icon name="store" className="text-purple-400" /> Gestión de Sucursales
+                    </h2>
+                    <p className="text-xs text-purple-300/70">Administra las ubicaciones físicas de FOREVER WHITE.MX</p>
+                  </div>
+                  <button onClick={() => setShowAddBranchModal(true)} className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-lg shadow-purple-900/50">
+                    <Icon name="plus" /> Agregar Nueva Sucursal
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {branches.map(b => {
+                    const branchOrdersCount = orders.filter(o => o.branchId === b.id).length;
+                    const branchRevenue = orders.filter(o => o.branchId === b.id).reduce((sum, o) => sum + Number(o.total), 0);
+
+                    return (
+                      <div key={b.id} className="p-5 bg-[#080214] border border-purple-900/80 rounded-2xl space-y-3 relative group hover:border-purple-500 transition">
+                        <div className="flex justify-between items-start">
+                          <div className="p-2.5 bg-purple-950/80 rounded-xl border border-purple-800 text-purple-300">
+                            <Icon name="store" className="w-5 h-5" />
+                          </div>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-800 font-bold">
+                            ID: {b.id}
+                          </span>
+                        </div>
+
+                        <div>
+                          <h3 className="font-bold text-white text-sm">{b.name}</h3>
+                          <p className="text-xs text-purple-300/70 flex items-center gap-1 mt-1">
+                            <Icon name="mapPin" className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                            {b.address}
+                          </p>
+                          <p className="text-xs text-purple-300/70 flex items-center gap-1 mt-1 font-mono">
+                            <Icon name="phone" className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                            {b.phone}
+                          </p>
+                          {b.manager && (
+                            <p className="text-[11px] text-slate-400 mt-2">
+                              👤 Encargado: <span className="text-purple-300 font-bold">{b.manager}</span>
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="pt-3 border-t border-purple-950/80 flex justify-between items-center text-xs">
+                          <div>
+                            <span className="text-[10px] text-purple-300/60 block">RECIBOS</span>
+                            <span className="font-mono font-bold text-white">{branchOrdersCount}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-purple-300/60 block">ACUMULADO</span>
+                            <span className="font-mono font-bold text-purple-400">${branchRevenue.toLocaleString()} MXN</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* REPORTES & METRICAS MODULE */}
+            {activeTab === 'reports' && currentUser.role === 'admin' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center pb-3 border-b border-purple-950/80">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <Icon name="barChart" className="text-purple-400" /> Analytics & Reportes de Servicios
+                    </h2>
+                    <p className="text-xs text-purple-300/70">Métricas por periodo, canal de captación y tipo de prendas atendidas.</p>
+                  </div>
+                  <div className="flex bg-[#080214] p-1 rounded-xl border border-purple-900/60 text-xs font-semibold">
+                    {['day', 'week', 'month', 'year'].map(tf => (
+                      <button key={tf} onClick={() => setReportTimeframe(tf)} className={`px-3 py-1.5 rounded-lg uppercase text-[10px] ${reportTimeframe === tf ? 'bg-purple-600 text-white font-bold' : 'text-purple-300/70'}`}>
+                        {tf === 'day' ? 'Día' : tf === 'week' ? 'Semana' : tf === 'month' ? 'Mes' : 'Año'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Metrics Highlights */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="p-4 bg-[#080214] border border-purple-950/80 rounded-2xl">
+                    <span className="text-[10px] text-purple-300/80 font-bold uppercase">Ingresos Totales</span>
+                    <p className="text-2xl font-black text-white mt-1">${financialMetrics.totalRevenue.toLocaleString()} MXN</p>
+                  </div>
+                  <div className="p-4 bg-[#080214] border border-purple-950/80 rounded-2xl">
+                    <span className="text-[10px] text-purple-300/80 font-bold uppercase">Egresos / Gastos</span>
+                    <p className="text-2xl font-black text-rose-400 mt-1">${financialMetrics.totalExpenses.toLocaleString()} MXN</p>
+                  </div>
+                  <div className="p-4 bg-[#080214] border border-purple-950/80 rounded-2xl">
+                    <span className="text-[10px] text-purple-300/80 font-bold uppercase">Servicio Más Demandado</span>
+                    <p className="text-sm font-black text-purple-300 mt-1 truncate">{financialMetrics.topServiceName}</p>
+                    <p className="text-[10px] text-purple-400/80 font-mono">{financialMetrics.topServiceCount} solicitudes</p>
+                  </div>
+                  <div className="p-4 bg-[#080214] border border-purple-950/80 rounded-2xl">
+                    <span className="text-[10px] text-purple-300/80 font-bold uppercase">Margen de Utilidad</span>
+                    <p className="text-2xl font-black text-emerald-400 mt-1">{financialMetrics.profitMargin}%</p>
+                  </div>
+                </div>
+
+                {/* Item Type Counts */}
+                <div className="p-5 bg-[#080214] border border-purple-950/80 rounded-2xl space-y-3">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Icon name="box" className="text-purple-400" /> Total de Calzado, Gorras y Equipaje Atendidos ({reportTimeframe.toUpperCase()})
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 bg-[#03000a] border border-purple-900/60 rounded-xl text-center">
+                      <span className="text-xs text-purple-300 font-bold">👟 Calzado</span>
+                      <p className="text-2xl font-mono font-black text-white mt-1">{financialMetrics.itemTotals.calzado}</p>
+                    </div>
+                    <div className="p-3 bg-[#03000a] border border-purple-900/60 rounded-xl text-center">
+                      <span className="text-xs text-purple-300 font-bold">🧢 Gorras</span>
+                      <p className="text-2xl font-mono font-black text-white mt-1">{financialMetrics.itemTotals.gorras}</p>
+                    </div>
+                    <div className="p-3 bg-[#03000a] border border-purple-900/60 rounded-xl text-center">
+                      <span className="text-xs text-purple-300 font-bold">🧳 Equipaje</span>
+                      <p className="text-2xl font-mono font-black text-white mt-1">{financialMetrics.itemTotals.equipaje}</p>
+                    </div>
+                    <div className="p-3 bg-[#03000a] border border-purple-900/60 rounded-xl text-center">
+                      <span className="text-xs text-purple-300 font-bold">👕 Varios</span>
+                      <p className="text-2xl font-mono font-black text-white mt-1">{financialMetrics.itemTotals.prendas}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Acquisition Channel Breakdown */}
+                <div className="p-5 bg-[#080214] border border-purple-950/80 rounded-2xl space-y-3">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Icon name="users" className="text-purple-400" /> ¿De Dónde Nos Conocieron Nuestros Clientes?
+                  </h3>
+                  <CustomBarChart 
+                    data={Object.keys(financialMetrics.channelCountMap).map(ch => ({ label: ch, val: financialMetrics.channelCountMap[ch] }))} 
+                    keyKey="label" 
+                    valueKey="val" 
+                    colorClass="bg-purple-500" 
+                  />
+                </div>
+
+              </div>
+            )}
+
+            {/* TEAM & EMAIL ROLES MODULE */}
+            {activeTab === 'team' && currentUser.role === 'admin' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-3 border-b border-purple-950/80">
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Icon name="shield" className="text-purple-400" /> Equipo de Trabajo & Control por Correo
+                  </h2>
+                  <button onClick={() => setShowAddUserModal(true)} className="px-3 py-1.5 bg-purple-600 text-white font-bold text-xs rounded-xl flex items-center gap-1">
+                    <Icon name="plus" /> Registrar Usuario
+                  </button>
+                </div>
+
+                <div className="bg-[#080214] rounded-2xl border border-purple-950/80 overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-[#03000a] text-purple-300/80 uppercase">
+                      <tr>
+                        <th className="p-3">Nombre</th>
+                        <th className="p-3">Correo</th>
+                        <th className="p-3">Rol / Permisos</th>
+                        <th className="p-3">Sucursal Asignada</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-purple-950/60">
+                      {users.map(u => (
+                        <tr key={u.id}>
+                          <td className="p-3 font-bold text-white">{u.name}</td>
+                          <td className="p-3 font-mono">{u.email}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded font-bold text-[10px] uppercase ${
+                              u.role === 'admin' ? 'bg-purple-950 text-purple-300 border border-purple-700' :
+                              u.role === 'cashier' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                              'bg-slate-900 text-slate-300 border border-slate-700'
+                            }`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-3">{branches.find(b => b.id === u.branchId)?.name || 'Todas'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* CRM MODULE */}
+            {activeTab === 'crm' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-3 border-b border-purple-950/80">
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Icon name="users" className="text-purple-400" /> CRM Base de Datos de Clientes
+                  </h2>
+                  <button onClick={() => setShowAddCustomerModal(true)} className="px-3 py-1.5 bg-purple-600 text-white font-bold text-xs rounded-xl flex items-center gap-1">
+                    <Icon name="plus" /> Nuevo Cliente
+                  </button>
+                </div>
+
+                <div className="bg-[#080214] rounded-2xl border border-purple-950/80 overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-[#03000a] text-purple-300/80 uppercase">
+                      <tr>
+                        <th className="p-3">Nombre</th>
+                        <th className="p-3">Teléfono</th>
+                        <th className="p-3">¿Cómo nos conoció?</th>
+                        <th className="p-3 text-center">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-purple-950/60">
+                      {customers.map(c => (
+                        <tr key={c.id}>
+                          <td className="p-3 font-bold text-white">{c.name}</td>
+                          <td className="p-3 font-mono">{c.phone}</td>
+                          <td className="p-3"><span className="px-2 py-0.5 bg-purple-950 text-purple-300 border border-purple-800 rounded-lg">{c.channel}</span></td>
+                          <td className="p-3 text-center">
+                            <a href={`https://wa.me/52${c.phone}`} target="_blank" rel="noopener noreferrer" className="text-emerald-400 font-bold flex items-center justify-center gap-1">
+                              <Icon name="messageCircle" /> WhatsApp
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* PROMOS & CONVENIOS MODULE */}
+            {activeTab === 'promos' && currentUser.role === 'admin' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center pb-3 border-b border-purple-950/80">
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Icon name="tag" className="text-purple-400" /> Códigos Promocionales & Convenios de Fidelización
+                  </h2>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Promo Codes */}
+                  <div className="p-4 bg-[#080214] border border-purple-950/80 rounded-2xl space-y-3">
+                    <h3 className="font-bold text-white text-sm">Códigos de Descuento Activos</h3>
+                    <div className="space-y-2">
+                      {discountCodes.map((d, i) => (
+                        <div key={i} className="p-3 bg-[#03000a] border border-purple-900/60 rounded-xl flex justify-between items-center">
+                          <div>
+                            <span className="font-mono font-bold text-purple-300">{d.code}</span>
+                            <p className="text-[10px] text-purple-300/60">{d.description}</p>
+                          </div>
+                          <span className="font-mono font-bold text-emerald-400">-{d.percent}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Convenios B2B */}
+                  <div className="p-4 bg-[#080214] border border-purple-950/80 rounded-2xl space-y-3">
+                    <h3 className="font-bold text-white text-sm">Convenios Aliados (Gimnasios / Locales)</h3>
+                    <div className="space-y-2">
+                      {convenios.map((c, i) => (
+                        <div key={i} className="p-3 bg-[#03000a] border border-purple-900/60 rounded-xl flex justify-between items-center">
+                          <div>
+                            <span className="font-bold text-white text-xs">{c.name}</span>
+                            <p className="text-[10px] text-purple-300/60">Contacto: {c.contact}</p>
+                          </div>
+                          <span className="font-mono font-bold text-purple-400">-{c.discountPercent}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CATALOG MODULE */}
+            {activeTab === 'catalog' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-3 border-b border-purple-950/80">
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Icon name="shoppingBag" className="text-purple-400" /> Catálogo de Servicios y Productos
+                  </h2>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {services.map(s => (
+                    <div key={s.id} className="p-4 bg-[#080214] border border-purple-950/80 rounded-2xl space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-white">{s.name}</span>
+                        <span className="font-mono text-purple-400 font-bold">${s.price} MXN</span>
+                      </div>
+                      <p className="text-[11px] text-purple-300/70">{s.description}</p>
+                      <span className="inline-block px-2 py-0.5 bg-purple-950 text-purple-300 text-[9px] rounded font-mono">{s.itemType}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </main>
+
+          {/* EMAIL LOGIN MODAL */}
+          {showLoginModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <form onSubmit={handleLoginByEmail} className="bg-[#080214] border border-purple-900/80 rounded-2xl p-5 max-w-sm w-full space-y-3">
+                <h3 className="font-bold text-white text-sm">Entrar con Correo Electrónico</h3>
+                <p className="text-xs text-purple-300/70">Ingresa tu correo registrado para validar tu rol de acceso.</p>
+                <input type="email" placeholder="ejemplo@foreverwhite.mx" value={loginEmailInput} onChange={e => setLoginEmailInput(e.target.value)} required className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setShowLoginModal(false)} className="px-3 py-1 bg-purple-950 text-xs text-purple-300 rounded-xl">Cancelar</button>
+                  <button type="submit" className="px-3 py-1 bg-purple-600 text-white font-bold text-xs rounded-xl">Iniciar Sesión</button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* REGISTER SUCURSAL MODAL */}
+          {showAddBranchModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <form onSubmit={handleSaveBranch} className="bg-[#080214] border border-purple-900/80 rounded-2xl p-5 max-w-sm w-full space-y-3">
+                <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
+                  <Icon name="store" className="text-purple-400" /> Registrar Nueva Sucursal
+                </h3>
+                <div>
+                  <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Nombre de Sucursal *</label>
+                  <input type="text" placeholder="Ej. Forever White - Coyoacán" value={newBranch.name} onChange={e => setNewBranch({ ...newBranch, name: e.target.value })} required className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Dirección Completa *</label>
+                  <input type="text" placeholder="Ej. Av. Hidalgo 45, Coyoacán, CDMX" value={newBranch.address} onChange={e => setNewBranch({ ...newBranch, address: e.target.value })} required className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Teléfono de Atención</label>
+                  <input type="tel" placeholder="Ej. 55 1122 3344" value={newBranch.phone} onChange={e => setNewBranch({ ...newBranch, phone: e.target.value })} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-purple-300/80 font-bold block mb-1">Encargado / Manager</label>
+                  <input type="text" placeholder="Ej. Roberto G." value={newBranch.manager} onChange={e => setNewBranch({ ...newBranch, manager: e.target.value })} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setShowAddBranchModal(false)} className="px-3 py-1 bg-purple-950 text-xs text-purple-300 rounded-xl">Cancelar</button>
+                  <button type="submit" className="px-3 py-1 bg-purple-600 text-white font-bold text-xs rounded-xl">Guardar Sucursal</button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* REGISTER CUSTOMER MODAL */}
+          {showAddCustomerModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#080214] border border-purple-900/80 rounded-2xl p-5 max-w-sm w-full space-y-3">
+                <h3 className="font-bold text-white text-sm">Nuevo Cliente</h3>
+                <input type="text" placeholder="Nombre Completo" value={newCustomer.name} onChange={e => setNewCustomer({ ...newCustomer, name: e.target.value })} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                <input type="tel" placeholder="Teléfono" value={newCustomer.phone} onChange={e => setNewCustomer({ ...newCustomer, phone: e.target.value })} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                <label className="text-[10px] text-purple-300/80 font-bold block">¿Cómo supo de nosotros?</label>
+                <select value={newCustomer.channel} onChange={e => setNewCustomer({ ...newCustomer, channel: e.target.value })} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white">
+                  {ACQUISITION_CHANNELS.map(ch => <option key={ch} value={ch}>{ch}</option>)}
+                </select>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={() => setShowAddCustomerModal(false)} className="px-3 py-1 bg-purple-950 text-xs text-purple-300 rounded-xl">Cancelar</button>
+                  <button onClick={handleSaveCustomer} className="px-3 py-1 bg-purple-600 text-white font-bold text-xs rounded-xl">Guardar</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* REGISTER TEAM USER MODAL */}
+          {showAddUserModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <form onSubmit={handleSaveUser} className="bg-[#080214] border border-purple-900/80 rounded-2xl p-5 max-w-sm w-full space-y-3">
+                <h3 className="font-bold text-white text-sm">Registrar Nuevo Usuario por Correo</h3>
+                <input type="text" placeholder="Nombre Completo" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} required className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                <input type="email" placeholder="correo@foreverwhite.mx" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white" />
+                <label className="text-[10px] text-purple-300/80 font-bold block">Rol de Acceso</label>
+                <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })} className="w-full bg-[#03000a] border border-purple-900/60 rounded-xl p-2 text-xs text-white">
+                  <option value="admin">Administrador (Acceso Total)</option>
+                  <option value="cashier">Cajero / Operador (POS y 1-Impresión)</option>
+                  <option value="technician">Técnico / Lavador</option>
+                </select>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setShowAddUserModal(false)} className="px-3 py-1 bg-purple-950 text-xs text-purple-300 rounded-xl">Cancelar</button>
+                  <button type="submit" className="px-3 py-1 bg-purple-600 text-white font-bold text-xs rounded-xl">Guardar</button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* HIDDEN PRINTABLE THERMAL RECEIPT AREA */}
+          <div id="printable-thermal-area" className="hidden">
+            <div className="text-center font-mono">
+              <h1 className="text-base font-black">FOREVER WHITE.MX</h1>
+              <p className="text-[10px]">RECIBO DE ATENCIÓN</p>
+              <hr className="my-2 border-dashed border-black" />
+            </div>
+          </div>
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
